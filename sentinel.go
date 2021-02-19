@@ -1,13 +1,15 @@
 package minisentinel
 
 import (
+	"errors"
 	"fmt"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/alicebob/miniredis/v2/server"
+	"github.com/google/uuid"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/alicebob/miniredis/v2"
-	"github.com/alicebob/miniredis/v2/server"
 )
 
 func errWrongNumber(cmd string) string {
@@ -17,14 +19,35 @@ func errWrongNumber(cmd string) string {
 // Sentinel - a redis sentinel server implementation.
 type Sentinel struct {
 	sync.Mutex
-	srv         *server.Server
-	port        int
-	password    string
-	signal      *sync.Cond
-	masterInfo  MasterInfo
-	master      *miniredis.Miniredis
-	replicaInfo ReplicaInfo
-	replica     *miniredis.Miniredis
+	srv          *server.Server
+	port         int
+	password     string
+	signal       *sync.Cond
+	masterInfo   MasterInfo
+	master       *miniredis.Miniredis
+	replicaInfo  ReplicaInfo
+	replica      *miniredis.Miniredis
+	sentinelInfo SentinelInfo
+
+	cmdHandler map[string]func(*server.Peer, string, []string) error
+}
+
+// SentinelInfo - define a redis sentinel
+type SentinelInfo struct {
+	Name                  string `mapstructure:"name"`
+	IP                    string `mapstructure:"ip"`
+	Port                  string `mapstructure:"port"`
+	RunID                 string `mapstructure:"runid"`
+	Flags                 string `mapstructure:"flags"`
+	LinkPendingCommands   string `mapstructure:"link-pending-commands"`
+	LinkRefCount          string `mapstructure:"link-refcount"`
+	LastPingSent          string `mapstructure:"last-ping-sent"`
+	LastOkPingReply       string `mapstructure:"last-ok-ping-reply"`
+	LastPingReply         string `mapstructure:"last-ping-reply"`
+	DownAfterMilliseconds string `mapstructure:"down-after-milliseconds"`
+	LastHelloMessage      string `mapstructure:"last-hello-message"`
+	VotedLeader           string `mapstructure:"voted-leader"`
+	VotedLeaderEpoch      string `mapstructure:"voted-leader-epoch"`
 }
 
 // connCtx has all state for a single connection.
@@ -43,8 +66,11 @@ func NewSentinel(master *miniredis.Miniredis, opts ...Option) *Sentinel {
 	if o.replica != nil {
 		s.replica = o.replica
 	}
-	s.MasterInfo(opts...)  // init and return masterInfo
-	s.ReplicaInfo(opts...) // init/return replicaInfo
+	s.MasterInfo(opts...)   // init and return masterInfo
+	s.ReplicaInfo(opts...)  // init/return replicaInfo
+	s.SentinelInfo(opts...) // init/return sentinelInfo
+
+	initSentinelCmdHandler(&s)
 	return &s
 }
 
@@ -182,6 +208,10 @@ func (s *Sentinel) ReplicaInfo(opts ...Option) ReplicaInfo {
 	return initReplicaInfo(s, opts...)
 }
 
+func (s *Sentinel) SentinelInfo(opts ...Option) SentinelInfo {
+	return initSentinelInfo(s, opts...)
+}
+
 // handleAuth returns false if connection has no access. It sends the reply.
 func (s *Sentinel) handleAuth(c *server.Peer) bool {
 	s.Lock()
@@ -205,4 +235,55 @@ func getCtx(c *server.Peer) *connCtx {
 
 func setAuthenticated(c *server.Peer) {
 	getCtx(c).authenticated = true
+}
+
+func initSentinelInfo(s *Sentinel, opts ...Option) SentinelInfo {
+	o := GetOpts(opts...)
+	s.sentinelInfo = SentinelInfo{
+		Name:                  fmt.Sprintf("sentinel-%s",o.masterName),
+		IP:                    s.master.Host(),
+		Port:                  strconv.Itoa(s.port),
+		RunID:                 uuid.New().String(),
+		Flags:                 "sentinel",
+		LinkPendingCommands:   "0",
+		LinkRefCount:          "1",
+		LastPingSent:          "0",
+		LastOkPingReply:       "0",
+		LastPingReply:         "0",
+		DownAfterMilliseconds: "5000",
+		LastHelloMessage:      "0",
+		VotedLeader:           "?",
+		VotedLeaderEpoch:      "0",
+	}
+	return s.sentinelInfo
+}
+
+// NewSentinelInfoFromStrings creates a new SentinelInfo
+func NewSentinelInfoFromStrings(s []string) (SentinelInfo, error) {
+	m := SentinelInfo{}
+	if len(s)%2 != 0 {
+		return m, errors.New("[]strings not a modulus of 2")
+	}
+
+	t := reflect.TypeOf(m)
+	v := reflect.ValueOf(&m)
+
+	// Iterate over all available fields and read the tag value
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("mapstructure")
+		// find the tag in s []string
+		for si, sv := range s {
+			if si%2 != 0 {
+				continue
+			}
+			if sv == tag {
+				if len(s) >= si+1 {
+					v.Elem().Field(i).SetString(s[si+1])
+				}
+				break
+			}
+		}
+	}
+	return m, nil
 }
