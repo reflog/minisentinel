@@ -127,7 +127,7 @@ func (s *Sentinel) sentinelsCommand(c *server.Peer, cmd string, args []string) e
 	v := reflect.ValueOf(sentinelInfo)
 
 	c.WriteLen(1)
-	c.WriteLen(t.NumField())
+	c.WriteLen(t.NumField()*2)
 
 	// Iterate over all available fields and read the tag value
 	for i := 0; i < t.NumField(); i++ {
