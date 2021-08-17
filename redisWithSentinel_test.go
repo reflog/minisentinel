@@ -44,11 +44,7 @@ func TestRedisWithSentinel(t *testing.T) {
 		Dial: func(addr string) (redis.Conn, error) {
 			connTimeout := time.Duration(50 * time.Millisecond)
 			readWriteTimeout := time.Duration(50 * time.Millisecond)
-			c, err := redis.DialTimeout("tcp", addr, connTimeout, readWriteTimeout, readWriteTimeout)
-			if err != nil {
-				return nil, err
-			}
-			return c, nil
+			return redis.DialTimeout("tcp", addr, connTimeout, readWriteTimeout, readWriteTimeout)
 		},
 	}
 	redisPassword := []byte("super-secret") // required because of m.RequireAuth()
@@ -62,14 +58,14 @@ func TestRedisWithSentinel(t *testing.T) {
 			if errHostAddr != nil {
 				return nil, errHostAddr
 			}
-			c, err := redis.Dial("tcp", redisHostAddr)
-			if err != nil {
-				return nil, err
+			c, err2 := redis.Dial("tcp", redisHostAddr)
+			if err2 != nil {
+				return nil, err2
 			}
 			if redisPassword != nil { // auth first, before doing anything else
-				if _, err := c.Do("AUTH", string(redisPassword)); err != nil {
+				if _, err2 := c.Do("AUTH", string(redisPassword)); err != nil {
 					c.Close()
-					return nil, err
+					return nil, err2
 				}
 			}
 			return c, nil

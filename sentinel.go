@@ -1,15 +1,17 @@
 package minisentinel
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/alicebob/miniredis/v2"
-	"github.com/alicebob/miniredis/v2/server"
-	"github.com/google/uuid"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/alicebob/miniredis/v2/server"
+	"github.com/google/uuid"
 )
 
 func errWrongNumber(cmd string) string {
@@ -104,6 +106,16 @@ func Run(master *miniredis.Miniredis, opts ...Option) (*Sentinel, error) {
 // Addr().
 func (s *Sentinel) Start() error {
 	srv, err := server.NewServer(fmt.Sprintf("127.0.0.1:%d", s.port))
+	if err != nil {
+		return err
+	}
+	return s.start(srv)
+}
+
+// Start starts a server. It listens on a random port on localhost. See also
+// Addr().
+func (s *Sentinel) StartTLS(cfg *tls.Config) error {
+	srv, err := server.NewServerTLS(fmt.Sprintf("127.0.0.1:%d", s.port), cfg)
 	if err != nil {
 		return err
 	}
@@ -240,7 +252,7 @@ func setAuthenticated(c *server.Peer) {
 func initSentinelInfo(s *Sentinel, opts ...Option) SentinelInfo {
 	o := GetOpts(opts...)
 	s.sentinelInfo = SentinelInfo{
-		Name:                  fmt.Sprintf("sentinel-%s",o.masterName),
+		Name:                  fmt.Sprintf("sentinel-%s", o.masterName),
 		IP:                    s.master.Host(),
 		Port:                  strconv.Itoa(s.port),
 		RunID:                 uuid.New().String(),
